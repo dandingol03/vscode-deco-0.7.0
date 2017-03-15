@@ -1,0 +1,128 @@
+/**
+ *    Copyright (C) 2015 Deco Software Inc.
+ *
+ *    This program is free software: you can redistribute it and/or modify
+ *    it under the terms of the GNU Affero General Public License, version 3,
+ *    as published by the Free Software Foundation.
+ *
+ *    This program is distributed in the hope that it will be useful,
+ *    but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *    GNU Affero General Public License for more details.
+ *
+ *    You should have received a copy of the GNU Affero General Public License
+ *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+'use strict'
+
+import _ from 'lodash'
+import { EventEmitter, } from 'events'
+import requestEmitter from './requestEmitter'
+
+import ApplicationConstants from 'shared/constants/ipc/ApplicationConstants'
+import FileConstants from 'shared/constants/ipc/FileConstants'
+import ComponentConstants from 'shared/constants/ipc/ComponentConstants'
+import ProcessConstants from 'shared/constants/ipc/ProcessConstants'
+import ProjectConstants from 'shared/constants/ipc/ProjectConstants'
+import WindowConstants from 'shared/constants/ipc/WindowConstants'
+import ModuleConstants from 'shared/constants/ipc/ModuleConstants'
+import CustomizeConstants from 'shared/constants/ipc/CustomizeConstants';
+
+import ErrorConstants from 'shared/constants/ipc/ErrorConstants'
+const {
+  ERROR,
+} = ErrorConstants
+
+
+import Logger from '../log/logger'
+
+const REQUEST_TYPES = [
+  ApplicationConstants,
+  FileConstants,
+  ComponentConstants,
+  ProcessConstants,
+  ProjectConstants,
+  WindowConstants,
+  ModuleConstants,
+  CustomizeConstants
+]
+
+//由main process 发送给 render process
+function sendToRenderer(channel, payload, windowId) {
+  if (!channel) {
+    Logger.error('Channel was found broken', channel)
+    return
+  }
+  //for the moment, we assume only one instance of the app is running
+  if (!payload) {
+    payload = {} // not sure if this will cause problems when undefined or null
+  }
+  
+    Logger.info('bridge send======\r\n windowId='+windowId+' channer='+channel);
+  if (windowId == 'preferences') {
+    try {
+      if (!global.preferencesWindow) return
+      global.preferencesWindow.webContents.send(channel, payload)
+    } catch (e) {
+      //the preferences window may not be open...
+      Logger.info('Warning: ', e)
+    }
+  } else {
+    Logger.info('openWindows='+global.openWindows);
+    for (var id in global.openWindows) {
+      global.openWindows[id].webContents.send(channel, payload)
+    }
+  }
+
+}
+
+class Bridge extends EventEmitter {
+
+  constructor() {
+    super()
+    this._init()
+    this._send = sendToRenderer
+  }
+
+  _init() {
+    _.each(REQUEST_TYPES, (requestTypes) => {
+      _.each(requestTypes, (id, requestType) => {
+
+
+        //这里相当于针对Constants都添加监听,requestEmitter继承于EventEmitter,但是就evt.sender新建了callback
+        if(requestType=='MODULE_NAVIGATE')
+          {
+            Logger.info('==========listen MODULE_NAVIGATE=======');
+            Logger.info('===========id->'+ id+'========');
+          }
+        requestEmitter.on(id, (body, callback, evt) => {
+          //this.emit equals to bridge.emit,we can use bridge.on to get message
+          //this.emit(params:id,body,func,evt)
+          if(id=='MODULE_NAVIGATE')
+          {
+            Logger.info('=======got navigate msg')
+          }
+          this.emit(id, body, (resp) => {
+            //Logger.info('callback='+resp.type);
+            if (resp && resp.type != ERROR) {
+              callback(null, resp)
+              return
+            }
+            callback(resp)
+          }, evt)
+        })
+      })
+    })
+  }
+
+  send(payload, windowId) {
+    this._send(payload.type, payload, windowId)
+  }
+
+}
+
+const bridge = new Bridge()
+
+export default bridge
